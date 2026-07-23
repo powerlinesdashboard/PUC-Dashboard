@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>State PUC &amp; Utility Factsheet</title>
+<link rel="stylesheet" href="vendor/fonts.css">
+<script src="vendor/d3.min.js"></script>
+<script src="vendor/topojson-client.min.js"></script>
+<script src="data.js"></script>
+<script>
+/* ============================================================
+   DATA SOURCE CONFIG — same shared Google Sheet as the dashboard.
+   Leave sheetId empty to use the baked snapshot in data.js.
+   ============================================================ */
+const CONFIG={
+  sheetId:'1l58RfG7rVHjYX96k3hX8FI7xSF9BB3MMhs9sTi9HO0A',
+  tabs:{ States:'States', rates:'Annual Rate Increase Requests', puc:'PUC Info',
+         commissioners:'Commissioners', capex:'CapEx', bills:'Utility Bills',
+         dockets:'Dockets', factsheets:'Factsheets', capexTotals:'CapEx Total By State' }
+};
+const OPTIONAL={factsheets:1, capexTotals:1};
+</script>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:#e9e5df;font-family:'Cairo',system-ui,sans-serif;color:#1E1B19;-webkit-font-smoothing:antialiased}
+  a{color:#1E1B19}
+  a:hover{color:#D91D4C}
+  #fst-bills svg,#fst-rate svg,#fst-sil svg{display:block;width:100%;height:100%}
+  @page{size:letter;margin:0}
+  @media print{ body{background:#fff} .fst-noprint{display:none !important} .fst-sheet{box-shadow:none !important;margin:0 !important} }
+</style>
+</head>
+<body>
+
+<div class="fst-noprint" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:20px 24px;font-family:'Figtree',sans-serif">
+  <span style="font:700 13px 'Figtree';color:#6f6a64">STATE</span>
+  <select id="stateSel" style="font:600 14px 'Figtree';padding:9px 12px;border:1px solid #cfc7be;border-radius:9px;background:#fff;color:#1E1B19;min-width:200px;cursor:pointer"></select>
+  <span id="sourceNote" style="font:500 12.5px 'Cairo';color:#8a837b">Loading live data…</span>
+</div>
+
+<div class="fst-sheet" id="sheet" style="width:816px;height:1056px;margin:0 auto 40px;background:#fff;box-shadow:0 6px 40px rgba(0,0,0,.14);padding:42px 44px;display:flex;flex-direction:column;gap:18px"></div>
+
+<script>
+const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTHS_FULL=['January','February','March','April','May','June','July','August','September','October','November','December'];
+const ATLAS='vendor/states-10m.json';
+const ACCENT='#F89735';
+function initialCode(){ try{ const u=new URLSearchParams(location.search); const q=(u.get('state')||u.get('s')||'').trim().toUpperCase(); return q||'CA'; }catch(e){ return 'CA'; } }
+
+const N=v=>{if(v==null||v==='')return null;const n=parseFloat(String(v).replace(/[$,%\s]/g,''));return isNaN(n)?null:n;};
+const S=v=>v==null?'':String(v).trim();
+const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+function colLetter(n){let s='';while(n>0){const m=(n-1)%26;s=String.fromCharCode(65+m)+s;n=(n-m-1)/26;}return s;}
+function parseCSV(text){const rows=[];let row=[],cur='',q=false;
+  for(let i=0;i<text.length;i++){const c=text[i];
+    if(q){ if(c==='"'){ if(text[i+1]==='"'){cur+='"';i++;} else q=false; } else cur+=c; }
+    else { if(c==='"')q=true; else if(c===','){row.push(cur);cur='';} else if(c==='\n'){row.push(cur);rows.push(row);row=[];cur='';} else if(c==='\r'){} else cur+=c; } }
+  if(cur!==''||row.length){row.push(cur);rows.push(row);} return rows; }
+function gridFromCSV(text){ return parseCSV(text).map((cells,i)=>{const o={_r:i+1};cells.forEach((v,ci)=>o[colLetter(ci+1)]=v);return o;}); }
+async function fetchTab(id,name){
+  const url='https://docs.google.com/spreadsheets/d/'+id+'/gviz/tq?tqx=out:csv&sheet='+encodeURIComponent(name);
+  const r=await fetch(url); if(!r.ok) throw new Error(name+' '+r.status); return gridFromCSV(await r.text()); }
+function parseMonth(v){const n=N(v);
+  if(n!=null&&n>20000){const d=new Date(Date.UTC(1899,11,30)+Math.round(n)*86400000);return{y:d.getUTCFullYear(),m:d.getUTCMonth()+1};}
+  const d=new Date(v); if(!isNaN(d))return{y:d.getFullYear(),m:d.getMonth()+1}; return null; }
+
+function transform(g){
+  const body=(name,hdr)=>(g[name]||[]).filter(r=>r._r>hdr);
+  const D={years:[2021,2022,2023,2024,2025,2026]};
+  D.states=body('States',1).map(r=>({name:S(r.A),code:S(r.B)})).filter(s=>s.code);
+  D.rateReq={};const rc=['C','D','E','F','G','H'],ac=['J','K','L','M','N','O'];
+  for(const r of body('rates',2)){const c=S(r.B);if(!c)continue;const req={},au={};let rt=0,at=0;
+    D.years.forEach((y,i)=>{const rv=N(r[rc[i]])||0,av=N(r[ac[i]])||0;req[y]=rv;au[y]=av;rt+=rv;at+=av;});
+    D.rateReq[c]={req,auth:au,reqTotal:N(r.I)!=null?N(r.I):rt,authTotal:N(r.P)!=null?N(r.P):at,note:S(r.Q)};}
+  D.puc={};for(const r of body('puc',1)){const c=S(r.B);if(!c)continue;D.puc[c]={commission:S(r.C),selection:S(r.D),advocateOffice:S(r.E),advocateName:S(r.F),execDir:S(r.G),ious:S(r.H),docketSearch:S(r.I)};}
+  D.commissioners={};for(const r of body('commissioners',1)){const c=S(r.B);if(!c)continue;(D.commissioners[c]=D.commissioners[c]||[]).push({name:S(r.C),title:S(r.D)});}
+  D.capex={};for(const r of body('capex',1)){const c=S(r.B);if(!c)continue;(D.capex[c]=D.capex[c]||[]).push({utility:S(r.C),capexB:N(r.D),period:S(r.E),multi:S(r.F)==='YES'});}
+  // Annual avg bill chart from columns E–K (2020–2026). The headline "latest average
+  // household bill" is read explicitly from column N; its header cell N2 names the month/year.
+  const byCols=['E','F','G','H','I','J','K'],byYears=[2020,2021,2022,2023,2024,2025,2026];
+  const ubHdr=(g.bills||[]).find(r=>r._r===2)||{};
+  const latestYM=parseMonth(ubHdr.N);   // N2 → { y, m }, e.g. "June 2026"
+  D.bills={};for(const r of body('bills',2)){const c=S(r.B);if(!c)continue;
+    const series=byCols.map((col,i)=>{const v=N(r[col]);return v==null?null:{y:byYears[i],v};}).filter(Boolean);
+    const nVal=N(r.N);   // column N → latest-month average household bill
+    const latestMonth=(latestYM&&nVal!=null)?{y:latestYM.y,m:latestYM.m,v:nVal}:null;
+    D.bills[c]={burden:N(r.C),burdenLowInc:N(r.D),avg2020:(series[0]?series[0].v:null),avg2026:(series.length?series[series.length-1].v:null),series,latestMonth};}
+  D.dockets=[];for(const r of body('dockets',2)){const c=S(r.B);if(!c)continue;
+    D.dockets.push({code:c,type:S(r.C),utility:S(r.D),id:S(r.E),title:S(r.F),status:S(r.G),reqAmt:N(r.J),priority:N(r.P),link:S(r.O)});}
+  D.capexTotals={};for(const r of body('capexTotals',1)){const c=S(r.B);if(!c)continue;const nums=[N(r.C),N(r.D),N(r.E)].filter(v=>v!=null);let yr=null,tot=null;nums.forEach(v=>{if(Number.isInteger(v)&&v>=2020&&v<=2100)yr=v;else if(tot==null)tot=v;});if(tot==null){const only=nums.find(v=>!(Number.isInteger(v)&&v>=2020&&v<=2100));if(only!=null)tot=only;}D.capexTotals[c]={total:tot,endYear:yr,utils:S(r.E)};}
+  return D;
+}
+
+/* ---------- state ---------- */
+let D=null, LIVE=false, US=null, code=initialCode();
+const fmtMoney=v=>'$'+(+v).toFixed(2);
+
+async function loadData(){
+  if(CONFIG.sheetId){
+    try{ const g={};
+      for(const key in CONFIG.tabs){ try{ g[key]=await fetchTab(CONFIG.sheetId,CONFIG.tabs[key]); }catch(e){ if(OPTIONAL[key]){g[key]=null;} else throw e; } }
+      return { D:transform(g), live:true };
+    }catch(e){ console.warn('Live sheet load failed; using baked snapshot.',e); }
+  }
+  return { D:window.PUC_DATA, live:false };
+}
+
+function boot(){
+  const waitLibs=()=>new Promise(res=>{const t=()=>{ if(window.d3&&window.topojson) res(); else setTimeout(t,60); };t();});
+  waitLibs().then(loadData).then(res=>{
+    D=res.D; LIVE=res.live;
+    return window.d3.json(ATLAS).then(topo=>{ US=window.topojson.feature(topo,topo.objects.states); });
+  }).then(()=>{ initPicker(); render(); }).catch(e=>console.warn('factsheet load failed',e));
+}
+boot();
+
+function initPicker(){
+  const sel=document.getElementById('stateSel');
+  sel.innerHTML='';
+  D.states.filter(s=>s.code!=='NE').slice().sort((a,b)=>a.name.localeCompare(b.name))
+    .forEach(s=>{const o=document.createElement('option');o.value=s.code;o.textContent=s.name;sel.appendChild(o);});
+  sel.value=code;
+  sel.onchange=()=>{ code=sel.value; render(); };
+}
+
+/* ---------- render ---------- */
+function featFor(name){ return US ? (US.features.find(f=>f.properties.name===name)||null) : null; }
+
+function renderVals(){
+  const name=(D.states.find(s=>s.code===code)||{}).name||code;
+  const bi=D.bills[code]||{};
+  const puc=D.puc[code]||{};
+
+  const series=bi.series||[];
+  const lm=bi.latestMonth;
+  const billLatest=lm?fmtMoney(lm.v):(series.length?fmtMoney(series[series.length-1].v):'—');
+  const billLatestCap=lm?('Average household bill for regulated customers in '+MONTHS_FULL[lm.m-1]+' '+lm.y)
+    :(series.length?('Average household bill for regulated customers in '+series[series.length-1].y):'Latest average residential bill');
+  const base=(bi.avg2020!=null?bi.avg2020:(series.length?series[0].v:null));
+  const latest=(bi.avg2026!=null?bi.avg2026:(series.length?series[series.length-1].v:null));
+  let billPct='—',arrow='',billPctCap='Change in average bills';
+  if(base!=null&&latest!=null&&base>0){
+    const p=(latest-base)/base*100;
+    arrow=p>=0?'▲':'▼'; billPct=Math.abs(p).toFixed(1)+'%';
+    const baseYr=(series.length?series[0].y:2020);
+    billPctCap=(p>=0?'Increase':'Decrease')+' in average household bills since '+baseYr;
+  }
+
+  const commTitle=puc.commission||(name+' Public Utilities Commission');
+  const nCom=(D.commissioners[code]||[]).length;
+  const commRows=[
+    {label:'Selection',value:puc.selection||'—'},
+    {label:'Number of Commissioners',value:nCom?String(nCom):'—'},
+    {label:'Consumer Advocate',value:puc.advocateOffice||'—'}
+  ];
+
+  const cx=D.capex[code]||[];
+  const ctRec=(D.capexTotals&&D.capexTotals[code])||null;
+  const ctTot=(ctRec&&ctRec.total!=null)?ctRec.total:cx.reduce((a,c)=>a+(c.capexB||0),0);
+  let y1=null,y2=null;const yrRe=/(20\d{2})/g;
+  for(const c of cx){let mm;while((mm=yrRe.exec(c.period||''))){const yy=+mm[1];y1=(y1==null?yy:Math.min(y1,yy));y2=(y2==null?yy:Math.max(y2,yy));}}
+  if(ctRec&&ctRec.endYear){y2=ctRec.endYear; if(y1==null)y1=y2-4;}
+  let period; if(y1&&y2&&y2>y1) period=y1+'–'+y2; else if(y2) period=(y2-4)+'–'+y2; else period='2026–2030';
+  const capexNum=ctTot>0?('$'+ctTot.toFixed(1)):'$0';
+  const capexUnit=ctTot>0?'billion':'';
+  const capexDesc=(cx.length||ctTot>0)?('Total proposed capital expenditures by '+name+' Investor-Owned Utilities from '+period+'*'):('No major IOU capital plans on file for '+name);
+  const utilsStr=(ctRec&&ctRec.utils)?ctRec.utils:(cx.map(c=>c.utility).filter(Boolean).join(', '));
+  const capexFootnote=utilsStr?('*Utilities included: '+utilsStr):'';
+
+  let dk=D.dockets.filter(d=>d.code===code&&/active|upcoming/i.test(d.status));
+  dk.sort((a,b)=>(a.priority==null?99:a.priority)-(b.priority==null?99:b.priority)||(b.reqAmt||0)-(a.reqAmt||0));
+  let docketRows=dk.slice(0,3).map(d=>({dlabel:(d.id?('Docket '+d.id):(d.type||'Proceeding')),sep:(d.title?': ':' '),title:(d.title||d.utility||'')}));
+  if(!docketRows.length) docketRows=[{dlabel:'',sep:'',title:'No active or upcoming proceedings on file.'}];
+  const docketSearch=puc.docketSearch||'';
+
+  return {
+    stateName:name,
+    billLatest, billLatestCap, billPct, arrow, billPctCap,
+    commTitle, commRows,
+    capexNum, capexUnit, capexDesc, capexFootnote,
+    showCapex: code!=='VT',
+    rateHeight: code==='VT' ? '404px' : '264px',
+    docketRows, docketSearch,
+    lastUpdated:'July 2026'
+  };
+}
+
+function render(){
+  document.getElementById('sourceNote').textContent = LIVE
+    ? 'Live from the shared Google Sheet — layout is fixed across all states.'
+    : 'Baked snapshot — layout is fixed across all states.';
+  const v=renderVals();
+  const capexBlock = v.showCapex ? `
+    <div style="display:flex;gap:16px;align-items:center;height:122px;flex:none;padding:2px 0">
+      <div style="flex:none;color:${ACCENT};white-space:nowrap;text-align:center">
+        <div style="font:900 52px/0.92 'Figtree'">${esc(v.capexNum)}</div>
+        <div style="font:900 26px/1 'Figtree'">${esc(v.capexUnit)}</div>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="box-sizing:border-box"><div style="font:400 18px/1.3 'Cairo';color:#1E1B19">${esc(v.capexDesc)}</div><div style="font:500 12px/1.45 'Cairo';color:#8a837b;margin-top:12px">${esc(v.capexFootnote)}</div></div>
+      </div>
+    </div>` : '';
+
+  const commLis=v.commRows.map(r=>`
+    <li style="display:flex;gap:9px;font:400 13.5px/1.35 'Cairo';color:#302c28">
+      <span style="width:6px;height:6px;border-radius:50%;background:#1E1B19;margin-top:6px;flex:none"></span>
+      <span style="font-size:12px"><b style="font-family:'Figtree';font-weight:800;color:#1E1B19">${esc(r.label)}:</b> ${esc(r.value)}</span>
+    </li>`).join('');
+
+  const docketLis=v.docketRows.map(d=>`
+    <li style="display:flex;gap:9px;font:400 13.5px/1.35 'Cairo';color:#302c28">
+      <span style="width:6px;height:6px;border-radius:50%;background:#1E1B19;margin-top:6px;flex:none"></span>
+      <span style="font-size:12px"><b style="font-family:'Figtree';font-weight:800;color:#1E1B19;text-decoration:underline">${esc(d.dlabel)}</b>${esc(d.sep)}${esc(d.title)}</span>
+    </li>`).join('');
+
+  document.getElementById('sheet').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:20px;flex:none">
+      <div style="display:flex;gap:16px;align-items:flex-start">
+        <div id="fst-sil" style="width:80px;height:80px;flex:none"></div>
+        <div>
+          <div style="font:900 42px/0.92 'Figtree';color:#1E1B19">${esc(v.stateName)}</div>
+          <div style="font:600 17px/1 'Figtree';letter-spacing:.03em;color:#3a352f;margin-top:6px">PUC &amp; UTILITY FACTSHEET</div>
+        </div>
+      </div>
+      <img src="assets/powerlines-logo.png" alt="POWERLINES" style="height:46px;width:auto;flex:none;margin-top:4px">
+    </div>
+    <div style="height:5px;border-radius:3px;background:linear-gradient(90deg,#FFD00F,#F89735,#D91D4C);flex:none;margin-top:-6px"></div>
+
+    <div style="display:flex;gap:26px;align-items:stretch;height:186px;flex:none">
+      <div style="flex:1.55;display:flex;flex-direction:column;min-width:0">
+        <div style="font:800 18px 'Figtree';text-align:center;margin-bottom:6px">Average Household Energy Bills</div>
+        <div id="fst-bills" style="flex:1;min-height:0"></div>
+      </div>
+      <div style="flex:1;border-left:1px solid #e7e0d9;padding-left:24px;display:flex;flex-direction:column;justify-content:center;gap:26px;min-width:0;text-align:right;align-items:flex-end">
+        <div>
+          <div style="font:900 48px/1 'Figtree';color:#D91D4C">${esc(v.billLatest)}</div>
+          <div style="font:500 13px/1.35 'Cairo';color:#6f6a64;margin-top:8px">${esc(v.billLatestCap)}</div>
+        </div>
+        <div>
+          <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end">
+            <span style="color:#D91D4C;font:900 42px/1 'Figtree'">${esc(v.arrow)}</span>
+            <span style="font:900 48px/1 'Figtree';color:#D91D4C">${esc(v.billPct)}</span>
+          </div>
+          <div style="font:500 13px/1.35 'Cairo';color:#6f6a64;margin-top:8px">${esc(v.billPctCap)}</div>
+        </div>
+      </div>
+    </div>
+
+    ${capexBlock}
+
+    <div style="display:flex;flex-direction:column;height:${v.rateHeight};flex:none">
+      <div style="font:800 18px 'Figtree';text-align:center;margin-bottom:6px">Annual Rate Increase Requests ($M)</div>
+      <div style="display:flex;gap:22px;justify-content:center;font:600 12.5px 'Figtree';color:#6f6a64;margin-bottom:6px">
+        <span style="display:flex;align-items:center;gap:6px"><i style="width:12px;height:12px;border-radius:50%;background:${ACCENT};display:inline-block"></i>Requested</span>
+        <span style="display:flex;align-items:center;gap:6px"><i style="width:12px;height:12px;border-radius:50%;background:#1E1B19;display:inline-block"></i>Authorized</span>
+      </div>
+      <div id="fst-rate" style="flex:1;min-height:0"></div>
+    </div>
+
+    <div style="display:flex;gap:22px;height:184px;flex:none;margin-top:auto">
+      <div style="flex:1;border:1px solid #e7e0d9;border-radius:18px;padding:16px 20px;display:flex;flex-direction:column;min-width:0">
+        <div style="font:800 17px/1.15 'Figtree';margin-bottom:12px">${esc(v.commTitle)}</div>
+        <ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px">${commLis}</ul>
+      </div>
+      <div style="flex:1;border:1px solid #e7e0d9;border-radius:18px;padding:16px 20px;display:flex;flex-direction:column;min-width:0">
+        <div style="font:800 17px/1.15 'Figtree';text-align:center;margin-bottom:12px">Active &amp; Upcoming Dockets</div>
+        <ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px">${docketLis}</ul>
+        <a href="${esc(v.docketSearch)}" target="_blank" style="text-align:center;font:700 13px 'Figtree';color:#1E1B19;text-decoration:underline;margin-top:auto;padding-top:8px">Search all dockets ↗</a>
+      </div>
+    </div>
+
+    <div style="text-align:center;font:500 12px 'Cairo';color:#8a837b;margin-top:16px;flex:none">Last updated ${esc(v.lastUpdated)}</div>
+  `;
+
+  drawSil(); drawBills(); drawRate(v.rateHeight);
+}
+
+function drawSil(){
+  const host=document.getElementById('fst-sil'); if(!host) return; host.innerHTML='';
+  const s=D.states.find(x=>x.code===code); if(!s) return;
+  const feat=featFor(s.name); if(!feat) return;
+  const d3=window.d3, w=80,h=80;
+  const svg=d3.select(host).append('svg').attr('viewBox','0 0 '+w+' '+h).attr('preserveAspectRatio','xMidYMid meet');
+  const proj=d3.geoAlbersUsa().fitSize([w,h],feat);
+  svg.append('path').attr('d',d3.geoPath(proj)(feat)).attr('fill',ACCENT);
+}
+
+function drawBills(){
+  const host=document.getElementById('fst-bills'); if(!host) return; host.innerHTML='';
+  const d3=window.d3;
+  const series=(D.bills[code]||{}).series;
+  if(!series||!series.length){ host.innerHTML='<div style="font:500 13px Cairo;color:#8a837b;font-style:italic;padding-top:24px">No bill data available.</div>'; return; }
+  const byYear={}; series.forEach(p=>{(byYear[p.y]=byYear[p.y]||[]).push(p.v);});
+  const pts=Object.keys(byYear).map(k=>({y:+k,v:d3.mean(byYear[k])})).sort((a,b)=>a.y-b.y);
+  const W=Math.max(220,host.clientWidth||440), H=Math.max(120,host.clientHeight||200), m={t:12,r:14,b:24,l:48};
+  const svg=d3.select(host).append('svg').attr('viewBox','0 0 '+W+' '+H).attr('preserveAspectRatio','none');
+  const years=pts.map(p=>p.y);
+  const x=d3.scalePoint().domain(years).range([m.l,W-m.r]).padding(0.5);
+  const top=Math.max(50,Math.ceil(d3.max(pts,d=>d.v)/50)*50);
+  const y=d3.scaleLinear().domain([0,top]).range([H-m.b,m.t]);
+  for(let t=0;t<=top;t+=50){ svg.append('line').attr('x1',m.l).attr('x2',W-m.r).attr('y1',y(t)).attr('y2',y(t)).attr('stroke','#e7e0d9'); svg.append('text').attr('x',m.l-6).attr('y',y(t)+3).attr('text-anchor','end').attr('font-family','Figtree').attr('font-size',11).attr('fill','#6f6a64').text('$'+t); }
+  years.forEach(yy=>svg.append('text').attr('x',x(yy)).attr('y',H-6).attr('text-anchor','middle').attr('font-family','Figtree').attr('font-size',11).attr('fill','#6f6a64').text(yy));
+  const line=d3.line().x(d=>x(d.y)).y(d=>y(d.v));
+  svg.append('path').datum(pts).attr('d',line).attr('fill','none').attr('stroke','#D91D4C').attr('stroke-width',3);
+  pts.forEach(p=>svg.append('circle').attr('cx',x(p.y)).attr('cy',y(p.v)).attr('r',4).attr('fill','#D91D4C'));
+}
+
+function drawRate(){
+  const host=document.getElementById('fst-rate'); if(!host) return; host.innerHTML='';
+  const d3=window.d3;
+  const rr=D.rateReq[code]||{req:{},auth:{},reqTotal:0,authTotal:0};
+  if((rr.reqTotal||0)<=0 && (rr.authTotal||0)<=0){
+    host.innerHTML='<div style="font:500 13px Cairo;color:#8a837b;font-style:italic;display:flex;align-items:center;justify-content:center;height:100%;text-align:center">'+(rr.note?esc(rr.note):'No rate increase requests filed 2021–2026.')+'</div>'; return;
+  }
+  const W=Math.max(220,host.clientWidth||500), H=Math.max(120,host.clientHeight||150), m={t:12,r:12,b:22,l:46};
+  const svg=d3.select(host).append('svg').attr('viewBox','0 0 '+W+' '+H).attr('preserveAspectRatio','none');
+  const yrs=D.years;
+  const x0=d3.scaleBand().domain(yrs).range([m.l,W-m.r]).paddingInner(0.28).paddingOuter(0.12);
+  const x1=d3.scaleBand().domain(['req','auth']).range([0,x0.bandwidth()]).padding(0.18);
+  const maxv=d3.max(yrs,yy=>Math.max(rr.req[yy]||0,rr.auth[yy]||0))||1;
+  const rawTop=maxv*1.08, rough=rawTop/5, pw=Math.pow(10,Math.floor(Math.log10(rough))), nm=rough/pw;
+  const step=(nm<1.5?1:nm<3?2:nm<7?5:10)*pw;
+  const top=Math.max(step,Math.ceil(rawTop/step)*step);
+  const y=d3.scaleLinear().domain([0,top]).range([H-m.b,m.t]);
+  const ticks=[];for(let t=0;t<=top+1e-6;t+=step)ticks.push(t);
+  ticks.forEach(v=>{svg.append('line').attr('x1',m.l).attr('x2',W-m.r).attr('y1',y(v)).attr('y2',y(v)).attr('stroke','#e7e0d9');
+    svg.append('text').attr('x',m.l-6).attr('y',y(v)+3).attr('text-anchor','end').attr('font-family','Figtree').attr('font-size',11).attr('fill','#6f6a64').text(v.toLocaleString());});
+  yrs.forEach(yy=>svg.append('text').attr('x',x0(yy)+x0.bandwidth()/2).attr('y',H-6).attr('text-anchor','middle').attr('font-family','Figtree').attr('font-size',11).attr('fill','#6f6a64').text(yy));
+  const colors={req:ACCENT,auth:'#1E1B19'};
+  yrs.forEach(yy=>['req','auth'].forEach(key=>{const v=rr[key][yy]||0;
+    svg.append('rect').attr('x',x0(yy)+x1(key)).attr('y',y(v)).attr('width',x1.bandwidth()).attr('height',Math.max(0,y(0)-y(v))).attr('fill',colors[key]).attr('rx',1.5);}));
+}
+</script>
+</body>
+</html>
