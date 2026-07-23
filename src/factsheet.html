@@ -189,8 +189,8 @@ function renderVals(){
 
 function render(){
   document.getElementById('sourceNote').textContent = LIVE
-    ? 'Live from the shared Google Sheet — layout is fixed across all states.'
-    : 'Baked snapshot — layout is fixed across all states.';
+    ? 'Live data loaded.'
+    : 'July 2026 data loaded.';
   const v=renderVals();
   const capexBlock = v.showCapex ? `
     <div style="display:flex;gap:16px;align-items:center;height:122px;flex:none;padding:2px 0">
