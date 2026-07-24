@@ -235,7 +235,7 @@ function transform(g){
   for(const r of body('rates',2)){const c=S(r.B);if(!c)continue;const req={},au={};let rt=0,at=0;
     D.years.forEach((y,i)=>{const rv=N(r[rc[i]])||0,av=N(r[ac[i]])||0;req[y]=rv;au[y]=av;rt+=rv;at+=av;});
     D.rateReq[c]={req,auth:au,reqTotal:N(r.I)!=null?N(r.I):rt,authTotal:N(r.P)!=null?N(r.P):at,note:S(r.Q)};}
-  D.puc={};for(const r of body('puc',1)){const c=S(r.B);if(!c)continue;D.puc[c]={commission:S(r.C),selection:S(r.D),advocateOffice:S(r.E),advocateName:S(r.F),execDir:S(r.G),ious:S(r.H),docketSearch:S(r.I)};}
+  D.puc={};for(const r of body('puc',1)){const c=S(r.B);if(!c)continue;D.puc[c]={commission:S(r.C),selection:S(r.D),advocateOffice:S(r.E),advocateName:S(r.F),execDir:S(r.G),ious:S(r.H),docketSearch:S(r.I),website:S(r.J),contactEmail:S(r.K)};}
   D.commissioners={};for(const r of body('commissioners',1)){const c=S(r.B);if(!c)continue;(D.commissioners[c]=D.commissioners[c]||[]).push({name:S(r.C),title:S(r.D)});}
   D.capex={};for(const r of body('capex',1)){const c=S(r.B);if(!c)continue;(D.capex[c]=D.capex[c]||[]).push({utility:S(r.C),capexB:N(r.D),period:S(r.E),multi:S(r.F)==='YES'});}
   // Monthly residential-bill series = column O through the last column with a value
@@ -377,6 +377,15 @@ function box2(){
     if(others.length) ul.appendChild(el('li',null,'<b>Commissioners:</b> '+others.map(esc).join(', ')));
     ul.appendChild(el('li',null,'<b>Selection:</b> '+esc(p.selection||'—')));
     ul.appendChild(el('li',null,'<b>Statutory Consumer Advocate Office:</b> '+esc(p.advocateOffice||'—')));
+    const site=p.website||'';
+    const siteHtml=site?('<a href="'+esc(site)+'" target="_blank">'+esc(site.replace(/^https?:\/\//i,'').replace(/\/+$/,''))+'</a>'):'—';
+    ul.appendChild(el('li',null,'<b>Website:</b> '+siteHtml));
+    const ck=p.contactEmail||'';
+    let contactHtml='—';
+    if(/^https?:\/\//i.test(ck)) contactHtml='<a href="'+esc(ck)+'" target="_blank">Contact</a>';
+    else if(/@/.test(ck)) contactHtml='<a href="mailto:'+esc(ck)+'">'+esc(ck)+'</a>';
+    else if(ck) contactHtml=esc(ck);
+    ul.appendChild(el('li',null,'<b>Contact:</b> '+contactHtml));
     b.appendChild(ul);
   } else {
     const sels=Object.values(D.puc).map(p=>p.selection||'');
