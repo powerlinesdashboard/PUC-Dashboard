@@ -101,7 +101,10 @@ async function loadData(){
   if(CONFIG.sheetId){
     try{ const g={};
       for(const key in CONFIG.tabs){ try{ g[key]=await fetchTab(CONFIG.sheetId,CONFIG.tabs[key]); }catch(e){ if(OPTIONAL[key]){g[key]=null;} else throw e; } }
-      return { D:transform(g), live:true };
+      const D=transform(g);
+      // Resilience: if the live feed returns no bill data, keep the baked snapshot's bills.
+      if(window.PUC_DATA&&window.PUC_DATA.bills&&!Object.values(D.bills||{}).some(b=>b&&b.series&&b.series.length)) D.bills=window.PUC_DATA.bills;
+      return { D, live:true };
     }catch(e){ console.warn('Live sheet load failed; using baked snapshot.',e); }
   }
   return { D:window.PUC_DATA, live:false };
