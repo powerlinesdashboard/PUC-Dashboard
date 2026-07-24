@@ -365,11 +365,15 @@ function box2(){
   const b=el('div','box');
   if(selected){
     const p=D.puc[selected]||{};const coms=D.commissioners[selected]||[];
-    const chair=coms.find(c=>/chair/i.test(c.title)&&!/vice/i.test(c.title))||coms.find(c=>/chair/i.test(c.title));
+    const isVacant=c=>/^vacant$/i.test((c.name||'').trim());
+    const vac=coms.filter(isVacant).length;
+    const namedComs=coms.filter(c=>c.name&&!isVacant(c));
+    const chair=namedComs.find(c=>/chair/i.test(c.title)&&!/vice/i.test(c.title))||namedComs.find(c=>/chair/i.test(c.title));
     b.appendChild(el('h3',null,esc(p.commission||codeToName[selected])));
     const ul=el('ul','info');
     ul.appendChild(el('li',null,'<b>Chair:</b> '+esc(chair?chair.name:'—')));
-    const others=coms.filter(c=>c!==chair).map(c=>c.name).filter(Boolean);
+    const others=namedComs.filter(c=>c!==chair).map(c=>c.name);
+    if(vac>0) others.push(vac===1?'1 Vacancy':(vac+' Vacancies'));
     if(others.length) ul.appendChild(el('li',null,'<b>Commissioners:</b> '+others.map(esc).join(', ')));
     ul.appendChild(el('li',null,'<b>Selection:</b> '+esc(p.selection||'—')));
     ul.appendChild(el('li',null,'<b>Statutory Consumer Advocate Office:</b> '+esc(p.advocateOffice||'—')));
