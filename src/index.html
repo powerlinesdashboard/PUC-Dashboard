@@ -94,6 +94,9 @@ const NATIONAL_CAPEX_HEADLINE = '$1.4T by 2030';
   ul.info li b{font-family:'Figtree';font-weight:800;color:var(--ink)}
   .stat-lg{font:900 30px 'Figtree';line-height:1}
   .stat-cap{font:600 12px 'Cairo';color:var(--muted);margin-top:3px}
+  .box h3 .subttl{display:block;font:500 12px/1.3 'Cairo';color:var(--muted);margin-top:4px}
+  .capex-lead{font:400 12px/1.2 'Cairo';color:var(--ink);margin-bottom:3px}
+  .capex-num{color:var(--magenta)}
   .pill{display:inline-block;font:800 10px 'Figtree';letter-spacing:.05em;padding:3px 8px;border-radius:20px;text-transform:uppercase}
   .pill.active{background:#e3f2ea;color:#2f7d5b}
   .pill.upcoming{background:#fde0c6;color:#9a5a12}
@@ -170,7 +173,7 @@ const NATIONAL_CAPEX_HEADLINE = '$1.4T by 2030';
   <section class="mapsec">
     <div class="mapinner">
       <div class="maptop">
-        <h2>Annual Rate Increase Requests</h2>
+        <h2>Utility Rate Increase Requests</h2>
         <div class="yr-row" id="yrRow"></div>
       </div>
       <div class="map-host" id="mapHost"><div class="loading">Loading map…</div></div>
@@ -388,13 +391,13 @@ function box2(){
 }
 function box3(){
   const b=el('div','box');
-  b.appendChild(el('h3',null,'Regulated Investor-Owned Utilities <span class="accent">&amp; Proposed CapEx</span>'));
+  b.appendChild(el('h3',null,'Regulated Investor-Owned Utilities <span class="accent">&amp; Proposed Spending on Capital Investments</span>'));
   if(selected){
     const list=(D.capex[selected]||[]).slice().sort((a,b)=>(b.capexB||0)-(a.capexB||0));
     if(list.length){
       let ct=(D.capexTotals&&D.capexTotals[selected])||null;
       if(!ct||ct.total==null){let s=0,my=0;const yrRe=/(20\d{2})/g;list.forEach(u=>{if(u.capexB)s+=u.capexB;if(u.period){let mm;while((mm=yrRe.exec(u.period)))my=Math.max(my,+mm[1]);}});if(s>0)ct={total:s,endYear:my||null};}
-      if(ct&&ct.total!=null){b.appendChild(el('div','stat-lg','$'+Math.round(ct.total)+'B'+(ct.endYear?(' by '+ct.endYear):'')));b.appendChild(el('div','stat-cap','Total proposed capital expenditures'));}
+      if(ct&&ct.total!=null){b.appendChild(el('div','capex-lead','Utilities plan to spend'));b.appendChild(el('div','stat-lg capex-num','$'+Math.round(ct.total)+'B'+(ct.endYear?(' by '+ct.endYear):'')));b.appendChild(el('div','stat-cap','Total proposed capital expenditures'));}
       const ul=el('ul','info');if(ct&&ct.total!=null)ul.style.marginTop='14px';
       list.forEach(c=>ul.appendChild(el('li',null,'<b>'+esc(c.utility)+(c.multi?'<span class="accent">*</span>':'')+':</b> '+(c.capexB!=null?fmtBonly(c.capexB*1000):'—')+(c.period?' ('+esc(c.period)+')':''))));
       b.appendChild(ul);
@@ -406,7 +409,8 @@ function box3(){
     for(const c in D.capex){let s=0;D.capex[c].forEach(u=>{if(u.capexB){s+=u.capexB;count++;}if(u.period){let mm;while((mm=yrRe.exec(u.period)))maxYear=Math.max(maxYear,+mm[1]);}});perState.push({code:c,s});}
     perState.sort((a,b)=>b.s-a.s);
     const by=maxYear?(' by '+maxYear):'';
-    b.appendChild(el('div','stat-lg', D.nationalCapex ? esc(D.nationalCapex) : NATIONAL_CAPEX_HEADLINE));
+    b.appendChild(el('div','capex-lead','Utilities plan to spend'));
+    b.appendChild(el('div','stat-lg capex-num', D.nationalCapex ? esc(D.nationalCapex) : NATIONAL_CAPEX_HEADLINE));
     b.appendChild(el('div','stat-cap','Total proposed CapEx across '+count+' regulated IOUs'));
     const ul=el('ul','info');ul.style.marginTop='12px';
     perState.slice(0,3).forEach(p=>ul.appendChild(el('li',null,'<b>'+esc(codeToName[p.code])+':</b> $'+p.s.toFixed(1)+'B'+by)));
@@ -417,7 +421,7 @@ function box3(){
 function lastMonthLabel(series){if(!series||!series.length)return null;const l=series[series.length-1];return MONTHS[l.m-1]+' '+l.y;}
 function box4(){
   const b=el('div','box');
-  b.appendChild(el('h3',null,'Average Residential Bills for Regulated Utility Customers'));
+  b.appendChild(el('h3',null,'Average Residential Utility Bills for Regulated Utility Customers'));
   let series, burden, lastVal, lbl;
   if(selected){const bi=D.bills[selected]||{};series=bi.series;burden=bi.burdenLowInc;}
   else {series=nationalBillSeries();burden=d3.mean(Object.values(D.bills),v=>v.burdenLowInc);}
@@ -447,7 +451,7 @@ function box5(){
 }
 function box6(){
   const b=el('div','box');
-  b.appendChild(el('h3',null,'Active &amp; Upcoming PUC Proceedings'));
+  b.appendChild(el('h3',null,'Active &amp; Upcoming PUC Proceedings<div class="subttl">Select list of up to 3 dockets</div>'));
   let list;
   if(selected) list=D.dockets.filter(d=>d.code===selected);
   else list=D.dockets.slice();
