@@ -262,7 +262,12 @@ function transform(g){
 async function loadData(){
   if(CONFIG.sheetId){
     try{ const g={}; for(const key in CONFIG.tabs){ try{ g[key]=await fetchTab(CONFIG.sheetId,CONFIG.tabs[key]); }catch(e){ if(OPTIONAL[key]){g[key]=null;} else throw e; } }
-      const D=transform(g); return D;
+      const D=transform(g);
+      // Resilience: if the live feed returns no monthly bill data (e.g. the Utility Bills tab
+      // comes back empty or changed), keep the baked snapshot's bills so the chart and the
+      // latest-bill figure still render instead of showing "No bill data available".
+      if(window.PUC_DATA&&window.PUC_DATA.bills&&!Object.values(D.bills||{}).some(b=>b&&b.series&&b.series.length)) D.bills=window.PUC_DATA.bills;
+      return D;
     }catch(e){ console.warn('Live sheet load failed; using baked snapshot.',e); }
   }
   return window.PUC_DATA;
