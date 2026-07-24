@@ -74,7 +74,7 @@ function transform(g){
   for(const r of body('rates',2)){const c=S(r.B);if(!c)continue;const req={},au={};let rt=0,at=0;
     D.years.forEach((y,i)=>{const rv=N(r[rc[i]])||0,av=N(r[ac[i]])||0;req[y]=rv;au[y]=av;rt+=rv;at+=av;});
     D.rateReq[c]={req,auth:au,reqTotal:N(r.I)!=null?N(r.I):rt,authTotal:N(r.P)!=null?N(r.P):at,note:S(r.Q)};}
-  D.puc={};for(const r of body('puc',1)){const c=S(r.B);if(!c)continue;D.puc[c]={commission:S(r.C),selection:S(r.D),advocateOffice:S(r.E),advocateName:S(r.F),execDir:S(r.G),ious:S(r.H),docketSearch:S(r.I)};}
+  D.puc={};for(const r of body('puc',1)){const c=S(r.B);if(!c)continue;D.puc[c]={commission:S(r.C),selection:S(r.D),advocateOffice:S(r.E),advocateName:S(r.F),execDir:S(r.G),ious:S(r.H),docketSearch:S(r.I),website:S(r.J),contactEmail:S(r.K)};}
   D.commissioners={};for(const r of body('commissioners',1)){const c=S(r.B);if(!c)continue;(D.commissioners[c]=D.commissioners[c]||[]).push({name:S(r.C),title:S(r.D)});}
   D.capex={};for(const r of body('capex',1)){const c=S(r.B);if(!c)continue;(D.capex[c]=D.capex[c]||[]).push({utility:S(r.C),capexB:N(r.D),period:S(r.E),multi:S(r.F)==='YES'});}
   // Annual avg bill chart from columns E–K (2020–2026). The headline "latest average
@@ -149,11 +149,27 @@ function renderVals(){
   }
 
   const commTitle=puc.commission||(name+' Public Utilities Commission');
-  const nCom=(D.commissioners[code]||[]).length;
+  const allCom=(D.commissioners[code]||[]).filter(c=>c.name);
+  const vacCount=allCom.filter(c=>/^vacant$/i.test(c.name.trim())).length;
+  const commItems=allCom.filter(c=>!/^vacant$/i.test(c.name.trim()))
+    .map(c=>esc(c.name)+(/chair/i.test(c.title||'')?(' ('+esc(c.title)+')'):''));
+  if(vacCount>0) commItems.push(vacCount===1?'1 Vacancy':(vacCount+' Vacancies'));
+  const commHtml=commItems.join(', ');
+  const linkStyle="color:#1E1B19;text-decoration:underline";
+  // Contact 1 (PUC Info col J = PUC Website): hyperlink, shown as the domain.
+  const site=puc.website||'';
+  const siteHtml=site?('<a href="'+esc(site)+'" target="_blank" style="'+linkStyle+'">'+esc(site.replace(/^https?:\/\//i,'').replace(/\/+$/,''))+'</a>'):'—';
+  // Contact 2 (PUC Info col K): an email → show the address (mailto); a link → the word "Contact" hyperlinked.
+  const ck=puc.contactEmail||'';
+  let contactHtml='—';
+  if(/^https?:\/\//i.test(ck)) contactHtml='<a href="'+esc(ck)+'" target="_blank" style="'+linkStyle+'">Contact</a>';
+  else if(/@/.test(ck)) contactHtml='<a href="mailto:'+esc(ck)+'" style="'+linkStyle+'">'+esc(ck)+'</a>';
+  else if(ck) contactHtml=esc(ck);
   const commRows=[
-    {label:'Selection',value:puc.selection||'—'},
-    {label:'Number of Commissioners',value:nCom?String(nCom):'—'},
-    {label:'Consumer Advocate',value:puc.advocateOffice||'—'}
+    {label:'Selection',valueHtml:esc(puc.selection||'—')},
+    {label:'Commissioners',valueHtml:commHtml||'—'},
+    {label:'Website',valueHtml:siteHtml},
+    {label:'Contact',valueHtml:contactHtml}
   ];
 
   const cx=D.capex[code]||[];
@@ -171,8 +187,8 @@ function renderVals(){
 
   let dk=D.dockets.filter(d=>d.code===code&&/active|upcoming/i.test(d.status));
   dk.sort((a,b)=>(a.priority==null?99:a.priority)-(b.priority==null?99:b.priority)||(b.reqAmt||0)-(a.reqAmt||0));
-  let docketRows=dk.slice(0,3).map(d=>({dlabel:(d.id?('Docket '+d.id):(d.type||'Proceeding')),sep:(d.title?': ':' '),title:(d.title||d.utility||'')}));
-  if(!docketRows.length) docketRows=[{dlabel:'',sep:'',title:'No active or upcoming proceedings on file.'}];
+  let docketRows=dk.slice(0,3).map(d=>({dlabel:(d.id?('Docket '+d.id):(d.type||'Proceeding')),sep:(d.title?': ':' '),title:(d.title||d.utility||''),link:d.link||''}));
+  if(!docketRows.length) docketRows=[{dlabel:'',sep:'',title:'No active or upcoming proceedings on file.',link:''}];
   const docketSearch=puc.docketSearch||'';
 
   return {
@@ -189,8 +205,8 @@ function renderVals(){
 
 function render(){
   document.getElementById('sourceNote').textContent = LIVE
-    ? 'Live data loaded.'
-    : 'July 2026 data loaded.';
+    ? 'Live from the shared Google Sheet — layout is fixed across all states.'
+    : 'Baked snapshot — layout is fixed across all states.';
   const v=renderVals();
   const capexBlock = v.showCapex ? `
     <div style="display:flex;gap:16px;align-items:center;height:122px;flex:none;padding:2px 0">
@@ -206,14 +222,18 @@ function render(){
   const commLis=v.commRows.map(r=>`
     <li style="display:flex;gap:9px;font:400 13.5px/1.35 'Cairo';color:#302c28">
       <span style="width:6px;height:6px;border-radius:50%;background:#1E1B19;margin-top:6px;flex:none"></span>
-      <span style="font-size:12px"><b style="font-family:'Figtree';font-weight:800;color:#1E1B19">${esc(r.label)}:</b> ${esc(r.value)}</span>
+      <span style="font-size:12px"><b style="font-family:'Figtree';font-weight:800;color:#1E1B19">${esc(r.label)}:</b> ${r.valueHtml}</span>
     </li>`).join('');
 
-  const docketLis=v.docketRows.map(d=>`
+  const docketLis=v.docketRows.map(d=>{
+    const lab = !d.dlabel ? '' : (d.link
+      ? `<a href="${esc(d.link)}" target="_blank" style="font-family:'Figtree';font-weight:800;color:#1E1B19;text-decoration:underline">${esc(d.dlabel)}</a>`
+      : `<b style="font-family:'Figtree';font-weight:800;color:#1E1B19;text-decoration:underline">${esc(d.dlabel)}</b>`);
+    return `
     <li style="display:flex;gap:9px;font:400 13.5px/1.35 'Cairo';color:#302c28">
       <span style="width:6px;height:6px;border-radius:50%;background:#1E1B19;margin-top:6px;flex:none"></span>
-      <span style="font-size:12px"><b style="font-family:'Figtree';font-weight:800;color:#1E1B19;text-decoration:underline">${esc(d.dlabel)}</b>${esc(d.sep)}${esc(d.title)}</span>
-    </li>`).join('');
+      <span style="font-size:12px">${lab}${esc(d.sep)}${esc(d.title)}</span>
+    </li>`;}).join('');
 
   document.getElementById('sheet').innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:20px;flex:none">
