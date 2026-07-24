@@ -555,5 +555,23 @@ function drawRate(rr, id){
   });});
 }
 </script>
+<script>
+/* Embed auto-resize: when this page is inside an iframe (e.g. the WordPress embed),
+   report its real height to the parent so the iframe can grow/shrink to fit — fixing
+   content being cut off on mobile or when a state changes the page height. */
+(function(){
+  if(window.parent===window) return;               // not embedded — do nothing
+  var last=0;
+  function post(){
+    var h=Math.ceil(document.documentElement.getBoundingClientRect().height);
+    if(h && Math.abs(h-last)>2){ last=h; window.parent.postMessage({pucDashboardHeight:h},'*'); }
+  }
+  window.addEventListener('load',post);
+  window.addEventListener('resize',post);
+  if(window.ResizeObserver){ try{ new ResizeObserver(post).observe(document.body); }catch(e){} }
+  // a few nudges to catch async chart/font layout after first paint
+  [200,600,1200,2500].forEach(function(t){ setTimeout(post,t); });
+})();
+</script>
 </body>
 </html>
