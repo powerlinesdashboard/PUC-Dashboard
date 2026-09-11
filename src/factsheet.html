@@ -20,6 +20,7 @@ const CONFIG={
          dockets:'Dockets', factsheets:'Factsheets', capexTotals:'CapEx Total By State' }
 };
 const OPTIONAL={factsheets:1, capexTotals:1};
+
 </script>
 <style>
   *{box-sizing:border-box}
@@ -40,7 +41,7 @@ const OPTIONAL={factsheets:1, capexTotals:1};
   <span id="sourceNote" style="font:500 12.5px 'Cairo';color:#8a837b">Loading live data…</span>
 </div>
 
-<div class="fst-sheet" id="sheet" style="width:816px;height:1056px;margin:0 auto 40px;background:#fff;box-shadow:0 6px 40px rgba(0,0,0,.14);padding:42px 44px;display:flex;flex-direction:column;gap:18px"></div>
+<div class="fst-sheet" id="sheet" style="width:816px;height:1056px;margin:0 auto 40px;background:#fff;box-shadow:0 6px 40px rgba(0,0,0,.14);padding:42px 44px;display:flex;flex-direction:column;gap:18px;overflow:hidden"></div>
 
 <script>
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -87,10 +88,35 @@ function transform(g){
     const nVal=N(r.N);   // column N → latest-month average household bill
     const latestMonth=(latestYM&&nVal!=null)?{y:latestYM.y,m:latestYM.m,v:nVal}:null;
     D.bills[c]={burden:N(r.C),burdenLowInc:N(r.D),avg2020:(series[0]?series[0].v:null),avg2026:(series.length?series[series.length-1].v:null),series,latestMonth};}
-  D.dockets=[];for(const r of body('dockets',2)){const c=S(r.B);if(!c)continue;
-    D.dockets.push({code:c,type:S(r.C),utility:S(r.D),id:S(r.E),title:S(r.F),status:S(r.G),reqAmt:N(r.J),priority:N(r.P),link:S(r.O)});}
+  // Dockets: header is row 1 (data starts row 2). Column P = "Display Priority".
+  D.dockets=[];for(const r of body('dockets',1)){const c=S(r.B);if(!c)continue;
+    D.dockets.push({code:c,type:S(r.C),utility:S(r.D),id:S(r.E),title:S(r.F),status:S(r.G),reqAmt:N(r.J),priority:N(r.P),link:S(r.O),row:r._r});}
   D.capexTotals={};for(const r of body('capexTotals',1)){const c=S(r.B);if(!c)continue;const nums=[N(r.C),N(r.D),N(r.E)].filter(v=>v!=null);let yr=null,tot=null;nums.forEach(v=>{if(Number.isInteger(v)&&v>=2020&&v<=2100)yr=v;else if(tot==null)tot=v;});if(tot==null){const only=nums.find(v=>!(Number.isInteger(v)&&v>=2020&&v<=2100));if(only!=null)tot=only;}D.capexTotals[c]={total:tot,endYear:yr,utils:S(r.E)};}
   return D;
+}
+
+/* Shrink-to-fit: any [data-fit] box whose copy overflows its fixed slot steps its
+   font size down (never below data-fit-min) so the sheet stays exactly one page. */
+function fitAll(){
+  document.querySelectorAll('#sheet [data-fit]').forEach(el=>{
+    const min=parseFloat(el.dataset.fitMin)||10;
+    /* Never clear fontSize here: these boxes set their size through the `font:`
+       shorthand, and clearing the longhand drops it entirely (browser default).
+       Read the authored size once, then always set an explicit px value. */
+    let base=parseFloat(el.dataset.fitBase);
+    if(!base){ base=parseFloat(getComputedStyle(el).fontSize); el.dataset.fitBase=base; }
+    let fs=base, guard=0;
+    el.style.fontSize=fs+'px';
+    /* Tolerance: on max-height boxes scrollHeight runs a few px past clientHeight from
+       line-box rounding alone. Only treat it as overflow once at least half a line is
+       actually clipped, so copy that fits keeps its designed size. */
+    const lh=parseFloat(getComputedStyle(el).lineHeight)||fs*1.35;
+    /* Flex-bounded boxes measure exactly, so 2px is the right epsilon. The max-height
+       boxes overshoot a few px from line-box rounding alone and get a looser one. */
+    const tol=getComputedStyle(el).maxHeight==='none'?2:Math.max(4,lh*0.5);
+    const over=()=>el.scrollHeight-el.clientHeight>tol;
+    while(over() && fs>min && guard++<60){ fs-=0.5; el.style.fontSize=fs+'px'; }
+  });
 }
 
 /* ---------- state ---------- */
@@ -100,7 +126,11 @@ const fmtMoney=v=>'$'+(+v).toFixed(2);
 async function loadData(){
   if(CONFIG.sheetId){
     try{ const g={};
-      for(const key in CONFIG.tabs){ try{ g[key]=await fetchTab(CONFIG.sheetId,CONFIG.tabs[key]); }catch(e){ if(OPTIONAL[key]){g[key]=null;} else throw e; } }
+      /* All tabs fetched in parallel — one round-trip's latency instead of nine. */
+      const keys=Object.keys(CONFIG.tabs);
+      const grids=await Promise.all(keys.map(k=>
+        fetchTab(CONFIG.sheetId,CONFIG.tabs[k]).catch(e=>{ if(OPTIONAL[k])return null; throw e; })));
+      keys.forEach((k,i)=>{g[k]=grids[i];});
       const D=transform(g);
       // Resilience: if the live feed returns no bill data, keep the baked snapshot's bills.
       if(window.PUC_DATA&&window.PUC_DATA.bills&&!Object.values(D.bills||{}).some(b=>b&&b.series&&b.series.length)) D.bills=window.PUC_DATA.bills;
@@ -189,7 +219,8 @@ function renderVals(){
   const capexFootnote=utilsStr?('*Utilities included: '+utilsStr):'';
 
   let dk=D.dockets.filter(d=>d.code===code&&/active|upcoming/i.test(d.status));
-  dk.sort((a,b)=>(a.priority==null?99:a.priority)-(b.priority==null?99:b.priority)||(b.reqAmt||0)-(a.reqAmt||0));
+  // Order strictly by the sheet's "Display Priority" (blank sorts last), then sheet order.
+  dk.sort((a,b)=>(a.priority==null?1e9:a.priority)-(b.priority==null?1e9:b.priority)||(a.row||0)-(b.row||0));
   let docketRows=dk.slice(0,3).map(d=>({dlabel:(d.id?('Docket '+d.id):(d.type||'Proceeding')),sep:(d.title?': ':' '),title:(d.title||d.utility||''),link:d.link||''}));
   if(!docketRows.length) docketRows=[{dlabel:'',sep:'',title:'No active or upcoming proceedings on file.',link:''}];
   const docketSearch=puc.docketSearch||'';
@@ -200,7 +231,7 @@ function renderVals(){
     commTitle, commRows,
     capexNum, capexUnit, capexDesc, capexFootnote,
     showCapex: code!=='VT',
-    rateHeight: code==='VT' ? '404px' : '264px',
+    rateHeight: code==='VT' ? '390px' : '250px',
     docketRows, docketSearch,
     lastUpdated:'July 2026'
   };
@@ -215,15 +246,16 @@ function render(){
         <div style="font:900 52px/0.92 'Figtree'">${esc(v.capexNum)}</div>
         <div style="font:900 26px/1 'Figtree'">${esc(v.capexUnit)}</div>
       </div>
-      <div style="flex:1;min-width:0">
-        <div style="box-sizing:border-box"><div style="font:400 18px/1.3 'Cairo';color:#1E1B19">${esc(v.capexDesc)}</div><div style="font:500 12px/1.45 'Cairo';color:#8a837b;margin-top:12px">${esc(v.capexFootnote)}</div></div>
+      <div style="flex:1;min-width:0;height:100%;overflow:hidden;display:flex;flex-direction:column;justify-content:center;gap:10px">
+        <div data-fit data-fit-min="13" style="font:400 18px/1.3 'Cairo';color:#1E1B19;max-height:74px;overflow:hidden">${esc(v.capexDesc)}</div>
+        <div data-fit data-fit-min="9" style="font:500 12px/1.45 'Cairo';color:#8a837b;max-height:36px;overflow:hidden">${esc(v.capexFootnote)}</div>
       </div>
     </div>` : '';
 
   const commLis=v.commRows.map(r=>`
-    <li style="display:flex;gap:9px;font:400 13.5px/1.35 'Cairo';color:#302c28">
+    <li style="display:flex;gap:9px">
       <span style="width:6px;height:6px;border-radius:50%;background:#1E1B19;margin-top:6px;flex:none"></span>
-      <span style="font-size:12px"><b style="font-family:'Figtree';font-weight:800;color:#1E1B19">${esc(r.label)}:</b> ${r.valueHtml}</span>
+      <span><b style="font-family:'Figtree';font-weight:800;color:#1E1B19">${esc(r.label)}:</b> ${r.valueHtml}</span>
     </li>`).join('');
 
   const docketLis=v.docketRows.map(d=>{
@@ -231,9 +263,9 @@ function render(){
       ? `<a href="${esc(d.link)}" target="_blank" style="font-family:'Figtree';font-weight:800;color:#1E1B19;text-decoration:underline">${esc(d.dlabel)}</a>`
       : `<b style="font-family:'Figtree';font-weight:800;color:#1E1B19;text-decoration:underline">${esc(d.dlabel)}</b>`);
     return `
-    <li style="display:flex;gap:9px;font:400 13.5px/1.35 'Cairo';color:#302c28">
+    <li style="display:flex;gap:9px">
       <span style="width:6px;height:6px;border-radius:50%;background:#1E1B19;margin-top:6px;flex:none"></span>
-      <span style="font-size:12px">${lab}${esc(d.sep)}${esc(d.title)}</span>
+      <span>${lab}${esc(d.sep)}${esc(d.title)}</span>
     </li>`;}).join('');
 
   document.getElementById('sheet').innerHTML = `
@@ -257,14 +289,14 @@ function render(){
       <div style="flex:1;border-left:1px solid #e7e0d9;padding-left:24px;display:flex;flex-direction:column;justify-content:center;gap:26px;min-width:0;text-align:right;align-items:flex-end">
         <div>
           <div style="font:900 48px/1 'Figtree';color:#D91D4C">${esc(v.billLatest)}</div>
-          <div style="font:500 13px/1.35 'Cairo';color:#6f6a64;margin-top:8px">${esc(v.billLatestCap)}</div>
+          <div data-fit data-fit-min="10" style="font:500 13px/1.35 'Cairo';color:#6f6a64;margin-top:8px;max-height:54px;overflow:hidden">${esc(v.billLatestCap)}</div>
         </div>
         <div>
           <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end">
             <span style="color:#D91D4C;font:900 42px/1 'Figtree'">${esc(v.arrow)}</span>
             <span style="font:900 48px/1 'Figtree';color:#D91D4C">${esc(v.billPct)}</span>
           </div>
-          <div style="font:500 13px/1.35 'Cairo';color:#6f6a64;margin-top:8px">${esc(v.billPctCap)}</div>
+          <div data-fit data-fit-min="10" style="font:500 13px/1.35 'Cairo';color:#6f6a64;margin-top:8px;max-height:54px;overflow:hidden">${esc(v.billPctCap)}</div>
         </div>
       </div>
     </div>
@@ -280,21 +312,21 @@ function render(){
       <div id="fst-rate" style="flex:1;min-height:0"></div>
     </div>
 
-    <div style="display:flex;gap:22px;height:184px;flex:none;margin-top:auto">
-      <div style="flex:1;border:1px solid #e7e0d9;border-radius:18px;padding:16px 20px;display:flex;flex-direction:column;min-width:0">
-        <div style="font:800 17px/1.15 'Figtree';margin-bottom:12px">${esc(v.commTitle)}</div>
-        <ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px">${commLis}</ul>
+    <div style="display:flex;gap:22px;height:198px;flex:none;margin-top:auto">
+      <div style="flex:1;border:1px solid #e7e0d9;border-radius:18px;padding:16px 20px;display:flex;flex-direction:column;min-width:0;overflow:hidden">
+        <div data-fit data-fit-min="12" style="font:800 17px/1.15 'Figtree';margin-bottom:12px;max-height:40px;overflow:hidden;flex:none">${esc(v.commTitle)}</div>
+        <ul data-fit data-fit-min="10.5" style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:0.72em;font:400 12px/1.35 'Cairo';color:#302c28;flex:1;min-height:0;overflow:hidden">${commLis}</ul>
       </div>
-      <div style="flex:1;border:1px solid #e7e0d9;border-radius:18px;padding:16px 20px;display:flex;flex-direction:column;min-width:0">
-        <div style="font:800 17px/1.15 'Figtree';text-align:center;margin-bottom:12px">Active &amp; Upcoming Dockets</div>
-        <ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px">${docketLis}</ul>
+      <div style="flex:1;border:1px solid #e7e0d9;border-radius:18px;padding:16px 20px;display:flex;flex-direction:column;min-width:0;overflow:hidden">
+        <div style="font:800 17px/1.15 'Figtree';text-align:center;margin-bottom:12px;flex:none">Active &amp; Upcoming Dockets</div>
+        <ul data-fit data-fit-min="10.5" style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:0.72em;font:400 12px/1.35 'Cairo';color:#302c28;flex:1;min-height:0;overflow:hidden">${docketLis}</ul>
       </div>
     </div>
 
-    <div style="text-align:center;font:500 12px 'Cairo';color:#8a837b;margin-top:16px;flex:none">Last updated ${esc(v.lastUpdated)}</div>
+    <div style="text-align:center;font:500 12px/1.2 'Cairo';color:#8a837b;margin-top:8px;flex:none">Last updated ${esc(v.lastUpdated)}</div>
   `;
 
-  drawSil(); drawBills(); drawRate(v.rateHeight);
+  drawSil(); drawBills(); drawRate(v.rateHeight); fitAll();
 }
 
 function drawSil(){
