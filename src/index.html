@@ -10,7 +10,7 @@
 <script src="data.js"></script>
 <script>
 /* ============================================================
-   DATA SOURCE CONFIG  —  the only thing you normally edit.
+   DATA SOURCE CONFIG
    To pull LIVE from your Google Sheet:
      1. In the sheet: Share ▸ General access ▸ "Anyone with the link" ▸ Viewer.
      2. Copy the sheet ID from its URL (the part between /d/ and /edit).
@@ -22,10 +22,36 @@ const CONFIG = {
   sheetId: '1l58RfG7rVHjYX96k3hX8FI7xSF9BB3MMhs9sTi9HO0A',
   tabs: { States:'States', rates:'Annual Rate Increase Requests', puc:'PUC Info',
           commissioners:'Commissioners', capex:'CapEx', bills:'Utility Bills',
-          dockets:'Dockets', capexTotals:'CapEx Total By State', benchmarks:'Benchmarks' }
+          dockets:'Dockets', capexTotals:'CapEx Total By State', benchmarks:'Benchmarks',
+          glossary:'Glossary' }
 };
 /* Tabs that may be absent without breaking the live load (fall back gracefully). */
-const OPTIONAL = { capexTotals:1, benchmarks:1 };
+const OPTIONAL = { capexTotals:1, benchmarks:1, glossary:1 };
+
+/* ------------------------------------------------------------
+   GLOSSARY / "?" EXPLAINERS  —  sheet tab "Glossary"
+   Row 1 = headers. Col A = Key, Col B = Term, Col C = Explainer.
+   A "?" circle only appears where the sheet has a non-empty explainer
+   for that key, so the UI stays clean until you fill it in.
+   Keys used by this page:
+     rate_increase_request, authorized, energy_burden, average_bill,
+     capex, iou, docket, commissioner_selection, consumer_advocate
+   ------------------------------------------------------------ */
+/* Starter explainer copy. The sheet's Glossary tab OVERRIDES this whenever it has
+   rows — so populate/refine language there, not here. Kept as a fallback so the "?"
+   circles still work offline and before the tab exists. */
+const GLOSSARY_FALLBACK = {
+  rate_increase_request:{term:'Rate increase request',text:'A formal request a utility files with its state commission to charge customers more. The commission reviews it and can approve, reduce, or reject the amount.'},
+  authorized:{term:'Authorized',text:'The portion of a requested increase the commission actually approved. It is often well below what the utility asked for.'},
+  energy_burden:{term:'Energy burden',text:"The share of a household's income that goes to energy bills. Shown here for households earning up to the area median income."},
+  average_bill:{term:'Average household bill',text:'The typical monthly bill for a household served by a rate-regulated investor-owned utility, averaged across the state.'},
+  capex:{term:'Capital expenditures',text:'Money utilities plan to spend building or upgrading infrastructure. Approved spending is recovered from customers through rates, plus an authorized rate of return.'},
+  iou:{term:'Investor-owned utility',text:'A private, for-profit utility owned by shareholders. Its rates must be reviewed and approved by the state commission.'},
+  docket:{term:'Docket',text:'A proceeding opened at the commission for a specific case — a rate request, a merger, or a policy review. Dockets are public and usually accept public comment.'},
+  commissioner_selection:{term:'Selection',text:"How a state's utility commissioners get their seats — appointed by the governor or legislature, or elected by voters."},
+  consumer_advocate:{term:'Statutory consumer advocate office',text:'A state office that represents utility customers in commission proceedings, independent of the commission itself.'}
+};
+
 
 /* National-view CapEx headline — the big number in the "Regulated Investor-Owned
    Utilities & Proposed CapEx" box when no state is selected. Pulled live from cell
@@ -153,6 +179,15 @@ const NATIONAL_CAPEX_HEADLINE = '$1.4T by 2030';
     .legend .lab{font-size:10px}
   }
   .loading{padding:70px 26px;text-align:center;font:600 15px 'Figtree';color:var(--muted)}
+
+  /* "?" explainers */
+  .hint{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;flex:none;margin:0 0 0 5px;padding:0;border:none;border-radius:50%;background:#ded4c9;color:#4a453f;font:800 10.5px/1 'Figtree';cursor:pointer;vertical-align:middle;transition:.12s}
+  .hint:hover,.hint.on{background:var(--orange);color:var(--ink)}
+  .hint:focus-visible{outline:2px solid var(--magenta);outline-offset:2px}
+  .hintpop{position:fixed;z-index:60;background:var(--ink);color:#fff;border-radius:11px;padding:12px 14px;box-shadow:0 12px 34px rgba(0,0,0,.24);opacity:0;visibility:hidden;transition:opacity .12s}
+  .hintpop.show{opacity:1;visibility:visible}
+  .hintpop .t{font:800 11px 'Figtree';letter-spacing:.06em;text-transform:uppercase;color:var(--yellow);margin-bottom:5px}
+  .hintpop .b{font:400 13px/1.5 'Cairo';color:#fff}
 </style>
 </head>
 <body>
@@ -173,7 +208,7 @@ const NATIONAL_CAPEX_HEADLINE = '$1.4T by 2030';
   <section class="mapsec">
     <div class="mapinner">
       <div class="maptop">
-        <h2>Utility Rate Increase Requests</h2>
+        <h2>Utility Rate Increase <span style="white-space:nowrap">Requests<span id="hintMap"></span></span></h2>
         <div class="yr-row" id="yrRow"></div>
       </div>
       <div class="map-host" id="mapHost"><div class="loading">Loading map…</div></div>
@@ -202,6 +237,49 @@ const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').rep
 const fmtB=m=>{ m=+m||0; return m>=1000?'$'+(m/1000).toFixed(1)+'B':(m>0?'$'+Math.round(m)+'M':'$0'); };
 const fmtBonly=m=>'$'+((+m||0)/1000).toFixed(1)+'B';
 const fmtMoney=v=>'$'+(+v).toFixed(2);
+
+/* ---------- "?" explainers (copy comes from the Glossary tab) ---------- */
+function glossaryTable(){
+  const g=(D&&D.glossary)||null;
+  return (g&&Object.keys(g).length)?g:GLOSSARY_FALLBACK;
+}
+function hint(key){
+  const e=glossaryTable()[key]||null;
+  if(!e)return '';
+  return '<button type="button" class="hint" data-hint="'+esc(key)+'" aria-label="What does &quot;'+esc(e.term)+'&quot; mean?">?</button>';
+}
+/* Appends the "?" to the LAST WORD inside a nowrap span, so the circle can never
+   wrap onto a line by itself in a narrow column. */
+function withHint(text,key){
+  const h=hint(key);
+  if(!h)return esc(text);
+  const i=text.lastIndexOf(' ');
+  return (i<0?'':esc(text.slice(0,i+1)))+'<span style="white-space:nowrap">'+esc(text.slice(i+1))+h+'</span>';
+}
+(function(){
+  let pop=null;
+  function close(){ if(pop)pop.classList.remove('show'); document.querySelectorAll('.hint.on').forEach(b=>b.classList.remove('on')); }
+  document.addEventListener('click',e=>{
+    const btn=e.target.closest('.hint');
+    if(!btn){ if(!e.target.closest('.hintpop')) close(); return; }
+    e.preventDefault();
+    const entry=glossaryTable()[btn.dataset.hint]||null;
+    if(!entry)return;
+    if(btn.classList.contains('on')){ close(); return; }
+    close(); btn.classList.add('on');
+    if(!pop){ pop=document.createElement('div'); pop.className='hintpop'; pop.setAttribute('role','tooltip'); document.body.appendChild(pop); }
+    pop.innerHTML='<div class="t">'+esc(entry.term)+'</div><div class="b">'+esc(entry.text)+'</div>';
+    pop.classList.add('show');
+    const r=btn.getBoundingClientRect(), w=Math.min(320,window.innerWidth-24);
+    pop.style.width=w+'px';
+    pop.style.left=Math.max(12,Math.min(r.left+r.width/2-w/2,window.innerWidth-w-12))+'px';
+    const h=pop.offsetHeight, above=r.top-h-10;
+    pop.style.top=(above>8?above:r.bottom+10)+'px';
+  });
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape')close(); });
+  window.addEventListener('resize',close);
+  window.addEventListener('scroll',close,true);
+})();
 
 /* ---------- CSV + live-sheet loader ---------- */
 function colLetter(n){let s='';while(n>0){const m=(n-1)%26;s=String.fromCharCode(65+m)+s;n=(n-m-1)/26;}return s;}
@@ -247,8 +325,10 @@ function transform(g){
   D.bills={};for(const r of body('bills',2)){const c=S(r.B);if(!c)continue;
     const series=mc.map(k=>{const ym=parseMonth(ubHdr[k]);const v=N(r[k]);return v==null?null:{y:ym.y,m:ym.m,v};}).filter(Boolean);
     D.bills[c]={burden:N(r.C),burdenLowInc:N(r.D),avg2020:N(r.E),avg2026:N(r.K),pctChange:N(r.L),rank:N(r.M),series};}
-  D.dockets=[];for(const r of body('dockets',2)){const c=S(r.B);if(!c)continue;const dd=parseMonth(r.I);
-    D.dockets.push({code:c,type:S(r.C),utility:S(r.D),id:S(r.E),title:S(r.F),status:S(r.G),decision:dd?dd.y+'-'+String(dd.m).padStart(2,'0'):'',reqAmt:N(r.J),roe:N(r.K),incr:N(r.L),mw:N(r.M),horizon:S(r.N),link:S(r.O),priority:N(r.P)});}
+  // Dockets: header is row 1 (data starts row 2). Column P = "Display Priority",
+  // which drives display order; row keeps the sheet's own order as the tiebreaker.
+  D.dockets=[];for(const r of body('dockets',1)){const c=S(r.B);if(!c)continue;const dd=parseMonth(r.I);
+    D.dockets.push({code:c,type:S(r.C),utility:S(r.D),id:S(r.E),title:S(r.F),status:S(r.G),decision:dd?dd.y+'-'+String(dd.m).padStart(2,'0'):'',reqAmt:N(r.J),roe:N(r.K),incr:N(r.L),mw:N(r.M),horizon:S(r.N),link:S(r.O),priority:N(r.P),row:r._r});}
   D.capexTotals={};if(g.capexTotals){for(const r of body('capexTotals',1)){const c=S(r.B);if(!c)continue;const nums=[N(r.C),N(r.D),N(r.E)].filter(v=>v!=null);let yr=null,tot=null;nums.forEach(v=>{if(Number.isInteger(v)&&v>=2020&&v<=2100)yr=v;else if(tot==null)tot=v;});if(tot==null){const only=nums.find(v=>!(Number.isInteger(v)&&v>=2020&&v<=2100));if(only!=null)tot=only;}D.capexTotals[c]={total:tot,endYear:yr};}}
   // National-view CapEx headline: cell B12 of the Benchmarks tab (label "National CapEx" in col A).
   D.nationalCapex='';
@@ -257,11 +337,30 @@ function transform(g){
     if(!v){const lr=g.benchmarks.find(r=>/^national capex$/i.test(S(r.A)));if(lr)v=S(lr.B);}
     D.nationalCapex=v;
   }
+  D.glossary=glossaryFrom(g.glossary);
   return D;
+}
+function glossaryFrom(rows){
+  const out={};
+  if(!rows)return out;
+  for(const r of rows.filter(r=>r._r>1)){
+    const key=S(r.A).toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+    const text=S(r.C);
+    if(!key||!text)continue;
+    out[key]={term:S(r.B)||S(r.A),text};
+  }
+  return out;
 }
 async function loadData(){
   if(CONFIG.sheetId){
-    try{ const g={}; for(const key in CONFIG.tabs){ try{ g[key]=await fetchTab(CONFIG.sheetId,CONFIG.tabs[key]); }catch(e){ if(OPTIONAL[key]){g[key]=null;} else throw e; } }
+    try{ const g={};
+      /* All tabs fetched in parallel — one round-trip's latency instead of nine.
+         An OPTIONAL tab that fails resolves to null; a required one rejects and
+         drops us into the baked-snapshot fallback below. */
+      const keys=Object.keys(CONFIG.tabs);
+      const grids=await Promise.all(keys.map(k=>
+        fetchTab(CONFIG.sheetId,CONFIG.tabs[k]).catch(e=>{ if(OPTIONAL[k])return null; throw e; })));
+      keys.forEach((k,i)=>{g[k]=grids[i];});
       const D=transform(g);
       // Resilience: if the live feed returns no monthly bill data (e.g. the Utility Bills tab
       // comes back empty or changed), keep the baked snapshot's bills so the chart and the
@@ -341,6 +440,7 @@ function selectState(code){
 function render(){
   const st=document.getElementById('scopeText');
   st.textContent = selected ? (codeToName[selected]+' — Public Utilities Commission') : 'Showing national totals — select a state on the map or from the menu.';
+  document.getElementById('hintMap').innerHTML=hint('rate_increase_request');
   const grid=document.getElementById('grid');
   grid.innerHTML='';
   const left=el('div','col'); left.appendChild(box1()); left.appendChild(box2()); left.appendChild(box6());
@@ -380,8 +480,8 @@ function box2(){
     const others=namedComs.filter(c=>c!==chair).map(c=>c.name);
     if(vac>0) others.push(vac===1?'1 Vacancy':(vac+' Vacancies'));
     if(others.length) ul.appendChild(el('li',null,'<b>Commissioners:</b> '+others.map(esc).join(', ')));
-    ul.appendChild(el('li',null,'<b>Selection:</b> '+esc(p.selection||'—')));
-    ul.appendChild(el('li',null,'<b>Statutory Consumer Advocate Office:</b> '+esc(p.advocateOffice||'—')));
+    ul.appendChild(el('li',null,'<span style="white-space:nowrap"><b>Selection:</b>'+hint('commissioner_selection')+'</span> '+esc(p.selection||'—')));
+    ul.appendChild(el('li',null,'<b>Statutory Consumer Advocate <span style="white-space:nowrap">Office:'+hint('consumer_advocate')+'</span></b> '+esc(p.advocateOffice||'—')));
     const site=p.website||'';
     const siteHtml=site?('<a href="'+esc(site)+'" target="_blank">'+esc(site.replace(/^https?:\/\//i,'').replace(/\/+$/,''))+'</a>'):'—';
     ul.appendChild(el('li',null,'<b>Website:</b> '+siteHtml));
@@ -409,7 +509,7 @@ function box2(){
 }
 function box3(){
   const b=el('div','box');
-  b.appendChild(el('h3',null,'Regulated Investor-Owned Utilities <span class="accent">&amp; Proposed Spending on Capital Investments</span>'));
+  b.appendChild(el('h3',null,withHint('Regulated Investor-Owned Utilities','iou')+' <span class="accent">&amp; Proposed Spending on Capital '+withHint('Investments','capex')+'</span>'));
   if(selected){
     const list=(D.capex[selected]||[]).slice().sort((a,b)=>(b.capexB||0)-(a.capexB||0));
     if(list.length){
@@ -439,21 +539,21 @@ function box3(){
 function lastMonthLabel(series){if(!series||!series.length)return null;const l=series[series.length-1];return MONTHS[l.m-1]+' '+l.y;}
 function box4(){
   const b=el('div','box');
-  b.appendChild(el('h3',null,'Average Residential Utility Bills for Regulated Utility Customers'));
+  b.appendChild(el('h3',null,withHint('Average Residential Utility Bills for Regulated Utility Customers','average_bill')));
   let series, burden, lastVal, lbl;
   if(selected){const bi=D.bills[selected]||{};series=bi.series;burden=bi.burdenLowInc;}
   else {series=nationalBillSeries();burden=d3.mean(Object.values(D.bills),v=>v.burdenLowInc);}
   if(series&&series.length){const last=series[series.length-1];lastVal=last.v;lbl=lastMonthLabel(series);}
   const head=el('div','statrow');
   head.appendChild(el('div',null,'<div class="stat-lg">'+(lastVal!=null?fmtMoney(lastVal):'—')+'</div><div class="stat-cap">'+(lbl?('Avg. bill · '+lbl):'Latest average bill')+'</div>'));
-  head.appendChild(el('div','burden','<div class="stat-lg" style="color:#F89735">'+(burden!=null?burden.toFixed(1)+'%':'—')+'</div><div class="stat-cap">Avg. energy burden (0–100% Area Median Income)</div>'));
+  head.appendChild(el('div','burden','<div class="stat-lg" style="color:#F89735">'+(burden!=null?burden.toFixed(1)+'%':'—')+'</div><div class="stat-cap"><span style="white-space:nowrap">Avg. energy burden'+hint('energy_burden')+'</span> (0–100% Area Median Income)</div>'));
   b.appendChild(head);
   b.appendChild(el('div','chart-host','<div id="bc"></div>'));
   return b;
 }
 function box5(){
   const b=el('div','box');
-  b.appendChild(el('h3',null,'Rate Increase Requests ($B) from 2021–2026'));
+  b.appendChild(el('h3',null,withHint('Rate Increase Requests ($B) from 2021–2026','rate_increase_request')));
   if(selected){
     const rr=D.rateReq[selected]||{reqTotal:0,authTotal:0};
     if((rr.reqTotal||0)<=0 && (rr.authTotal||0)<=0){
@@ -463,19 +563,29 @@ function box5(){
   }
   b.appendChild(el('div','chart-host','<div id="rc"></div>'));
   const lg=el('div','chart-legend');
-  lg.innerHTML='<span><i style="background:#F89735"></i>Requested</span><span><i style="background:#1E1B19"></i>Authorized</span>';
+  lg.innerHTML='<span><i style="background:#F89735"></i>Requested</span><span><i style="background:#1E1B19"></i>Authorized'+hint('authorized')+'</span>';
   b.appendChild(lg);
   return b;
 }
 function box6(){
   const b=el('div','box');
-  b.appendChild(el('h3',null,'Active &amp; Upcoming PUC Proceedings<div class="subttl">Select list of up to 3 dockets</div>'));
-  let list;
-  if(selected) list=D.dockets.filter(d=>d.code===selected);
-  else list=D.dockets.slice();
-  list=list.filter(d=>/active|upcoming/i.test(d.status));
-  list.sort((a,b)=>(a.priority==null?99:a.priority)-(b.priority==null?99:b.priority)||(b.reqAmt||0)-(a.reqAmt||0));
-  const top=list.slice(0,3);
+  /* Every ACTIVE proceeding shows. Upcoming ones only fill in behind them, and only
+     up to five rows total. (National view: five rows, active first — showing all 58
+     active proceedings nationwide would swamp the box.) */
+  const MAX=5;
+  const byPriority=(x,y)=>(x.priority==null?1e9:x.priority)-(y.priority==null?1e9:y.priority)||(x.row||0)-(y.row||0);
+  const pool=selected?D.dockets.filter(d=>d.code===selected):D.dockets.slice();
+  const active=pool.filter(d=>/active/i.test(d.status)).sort(byPriority);
+  const upcoming=pool.filter(d=>/upcoming/i.test(d.status)).sort(byPriority);
+  let top=selected?active.slice():active.slice(0,MAX);
+  if(top.length<MAX) top=top.concat(upcoming.slice(0,MAX-top.length));
+  const subttl=!top.length?''
+    :(function(){
+      const a=top.filter(d=>/active/i.test(d.status)).length, u=top.length-a;
+      const counts=[a?a+' active':'',u?u+' upcoming':''].filter(Boolean).join(' · ');
+      return selected?counts:('Highest priority nationwide · '+counts);
+    })();
+  b.appendChild(el('h3',null,withHint('Active & Upcoming PUC Proceedings','docket')+(subttl?'<div class="subttl">'+esc(subttl)+'</div>':'')));
   if(!top.length){b.appendChild(el('div','miss','No active or upcoming proceedings on file.'));return b;}
   top.forEach(d=>{
     const row=el('div','docket');
