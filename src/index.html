@@ -545,7 +545,7 @@ function box4(){
   else {series=nationalBillSeries();burden=d3.mean(Object.values(D.bills),v=>v.burdenLowInc);}
   if(series&&series.length){const last=series[series.length-1];lastVal=last.v;lbl=lastMonthLabel(series);}
   const head=el('div','statrow');
-  head.appendChild(el('div',null,'<div class="stat-lg">'+(lastVal!=null?fmtMoney(lastVal):'—')+'</div><div class="stat-cap">'+(lbl?('Avg. bill · '+lbl):'Latest average bill')+'</div>'));
+  head.appendChild(el('div',null,'<div class="stat-lg">'+(lastVal!=null?fmtMoney(lastVal):'—')+'</div><div class="stat-cap">'+(lbl?('Average bill · '+lbl):'Latest average bill')+'</div>'));
   head.appendChild(el('div','burden','<div class="stat-lg" style="color:#F89735">'+(burden!=null?burden.toFixed(1)+'%':'—')+'</div><div class="stat-cap"><span style="white-space:nowrap">Avg. energy burden'+hint('energy_burden')+'</span> (0–100% Area Median Income)</div>'));
   b.appendChild(head);
   b.appendChild(el('div','chart-host','<div id="bc"></div>'));
