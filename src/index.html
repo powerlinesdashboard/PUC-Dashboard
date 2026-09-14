@@ -583,7 +583,7 @@ function box6(){
     :(function(){
       const a=top.filter(d=>/active/i.test(d.status)).length, u=top.length-a;
       const counts=[a?a+' active':'',u?u+' upcoming':''].filter(Boolean).join(' · ');
-      return selected?counts:('Highest priority nationwide · '+counts);
+      return selected?counts:('Selection of nationwide dockets · '+counts);
     })();
   b.appendChild(el('h3',null,withHint('Active & Upcoming PUC Proceedings','docket')+(subttl?'<div class="subttl">'+esc(subttl)+'</div>':'')));
   if(!top.length){b.appendChild(el('div','miss','No active or upcoming proceedings on file.'));return b;}
