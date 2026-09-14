@@ -10,7 +10,7 @@
 <script src="data.js"></script>
 <script>
 /* ============================================================
-   DATA SOURCE CONFIG
+   DATA SOURCE CONFIG  —  the only thing you normally edit.
    To pull LIVE from your Google Sheet:
      1. In the sheet: Share ▸ General access ▸ "Anyone with the link" ▸ Viewer.
      2. Copy the sheet ID from its URL (the part between /d/ and /edit).
@@ -131,6 +131,8 @@ const NATIONAL_CAPEX_HEADLINE = '$1.4T by 2030';
   .docket .top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:3px}
   .docket .num{font:800 13px 'Figtree'}
   .docket .meta{font:500 12px 'Cairo';color:var(--muted)}
+  a.btn.dk-search{margin-top:14px;text-decoration:none;align-self:flex-start}
+  a.btn.dk-search:hover{color:#fff}
   .btn{display:inline-flex;align-items:center;gap:7px;font:800 12.5px 'Figtree';padding:11px 16px;border-radius:9px;background:var(--magenta);color:#fff;border:none;cursor:pointer;align-self:flex-start;margin-top:auto}
   .btn:hover{background:#bd1741;color:#fff}
   .btn.disabled{background:#e7e0d9;color:#a9a29b;cursor:not-allowed;pointer-events:none}
@@ -509,7 +511,7 @@ function box2(){
 }
 function box3(){
   const b=el('div','box');
-  b.appendChild(el('h3',null,withHint('Regulated Investor-Owned Utilities','iou')+' <span class="accent">&amp; Proposed Spending on Capital '+withHint('Investments','capex')+'</span>'));
+  b.appendChild(el('h3',null,'Regulated Investor-Owned Utilities <span class="accent">&amp; Proposed Spending on Capital '+withHint('Investments','capex')+'</span>'));
   if(selected){
     const list=(D.capex[selected]||[]).slice().sort((a,b)=>(b.capexB||0)-(a.capexB||0));
     if(list.length){
@@ -545,7 +547,7 @@ function box4(){
   else {series=nationalBillSeries();burden=d3.mean(Object.values(D.bills),v=>v.burdenLowInc);}
   if(series&&series.length){const last=series[series.length-1];lastVal=last.v;lbl=lastMonthLabel(series);}
   const head=el('div','statrow');
-  head.appendChild(el('div',null,'<div class="stat-lg">'+(lastVal!=null?fmtMoney(lastVal):'—')+'</div><div class="stat-cap">'+(lbl?('Average bill · '+lbl):'Latest average bill')+'</div>'));
+  head.appendChild(el('div',null,'<div class="stat-lg">'+(lastVal!=null?fmtMoney(lastVal):'—')+'</div><div class="stat-cap">'+(lbl?('Avg. bill · '+lbl):'Latest average bill')+'</div>'));
   head.appendChild(el('div','burden','<div class="stat-lg" style="color:#F89735">'+(burden!=null?burden.toFixed(1)+'%':'—')+'</div><div class="stat-cap"><span style="white-space:nowrap">Avg. energy burden'+hint('energy_burden')+'</span> (0–100% Area Median Income)</div>'));
   b.appendChild(head);
   b.appendChild(el('div','chart-host','<div id="bc"></div>'));
@@ -569,34 +571,39 @@ function box5(){
 }
 function box6(){
   const b=el('div','box');
-  /* Every ACTIVE proceeding shows. Upcoming ones only fill in behind them, and only
-     up to five rows total. (National view: five rows, active first — showing all 58
-     active proceedings nationwide would swamp the box.) */
+  /* Listings cap at five rows: active first, upcoming filling any remainder.
+     The subtitle counts every matching docket in the sheet, not just the rows shown. */
   const MAX=5;
   const byPriority=(x,y)=>(x.priority==null?1e9:x.priority)-(y.priority==null?1e9:y.priority)||(x.row||0)-(y.row||0);
   const pool=selected?D.dockets.filter(d=>d.code===selected):D.dockets.slice();
   const active=pool.filter(d=>/active/i.test(d.status)).sort(byPriority);
   const upcoming=pool.filter(d=>/upcoming/i.test(d.status)).sort(byPriority);
-  let top=selected?active.slice():active.slice(0,MAX);
+  let top=active.slice(0,MAX);
   if(top.length<MAX) top=top.concat(upcoming.slice(0,MAX-top.length));
   const subttl=!top.length?''
     :(function(){
-      const a=top.filter(d=>/active/i.test(d.status)).length, u=top.length-a;
-      const counts=[a?a+' active':'',u?u+' upcoming':''].filter(Boolean).join(' · ');
-      return selected?counts:('Selection of nationwide dockets · '+counts);
+      const counts=active.length?active.length+' active':'';
+      return selected?counts:('Selection of nationwide dockets'+(counts?' · '+counts:''));
     })();
   b.appendChild(el('h3',null,withHint('Active & Upcoming PUC Proceedings','docket')+(subttl?'<div class="subttl">'+esc(subttl)+'</div>':'')));
-  if(!top.length){b.appendChild(el('div','miss','No active or upcoming proceedings on file.'));return b;}
+  // Search-all link: "Docket Search" column of the PUC Info tab (national view has none).
+  const search=selected?((D.puc[selected]||{}).docketSearch||''):'';
+  const searchBtn=()=>{ if(!search)return; const a=el('a','btn dk-search','Search all dockets');
+    a.href=search; a.target='_blank'; a.rel='noopener'; b.appendChild(a); };
+  if(!top.length){b.appendChild(el('div','miss','No active or upcoming proceedings on file.'));searchBtn();return b;}
   top.forEach(d=>{
     const row=el('div','docket');
     const num=d.id||d.title||d.type||'Proceeding';
-    const numHtml=d.link?('<a class="num" href="'+esc(d.link)+'" target="_blank">'+esc(num)+' ↗</a>'):('<span class="num">'+esc(num)+'</span>');
-    const pill='<span class="pill '+(/active/i.test(d.status)?'active':'upcoming')+'">'+esc(d.status)+'</span>';
+    const up=/upcoming/i.test(d.status);
+    // Upcoming proceedings have no filing to link to yet.
+    const numHtml=(d.link&&!up)?('<a class="num" href="'+esc(d.link)+'" target="_blank">'+esc(num)+' ↗</a>'):('<span class="num">'+esc(num)+'</span>');
+    const pill='<span class="pill '+(up?'upcoming':'active')+'">'+esc(d.status)+'</span>';
     row.appendChild(el('div','top',numHtml+pill));
     const who=(selected?'':(esc(codeToName[d.code])+' · '))+esc(d.type||'')+(d.utility?' · '+esc(d.utility):'');
     row.appendChild(el('div','meta',who));
     b.appendChild(row);
   });
+  searchBtn();
   return b;
 }
 
