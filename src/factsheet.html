@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="omelette-owns-print" content="1">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>State PUC &amp; Utility Factsheet</title>
 <link rel="stylesheet" href="vendor/fonts.css">
@@ -26,11 +27,15 @@ const OPTIONAL={factsheets:1, capexTotals:1};
   *{box-sizing:border-box}
   html,body{margin:0}
   body{background:#e9e5df;font-family:'Cairo',system-ui,sans-serif;color:#1E1B19;-webkit-font-smoothing:antialiased}
+  /* Chrome's PDF backend was darkening the orange capex figure (the sheet's only
+     orange TEXT) to #A46423 while leaving vector oranges at #F89735. Tell the
+     print engine not to adjust colors. */
+  .fst-sheet,.fst-sheet *{print-color-adjust:exact;-webkit-print-color-adjust:exact}
   a{color:#1E1B19}
   a:hover{color:#D91D4C}
   #fst-bills svg,#fst-rate svg,#fst-sil svg{display:block;width:100%;height:100%}
   @page{size:letter;margin:0}
-  @media print{ body{background:#fff} .fst-noprint{display:none !important} .fst-sheet{box-shadow:none !important;margin:0 !important} }
+  @media print{ body{background:#fff} .fst-noprint{display:none !important} .fst-sheet{box-shadow:none !important;margin:0 !important} #stack{margin-top:0 !important} }
 </style>
 </head>
 <body>
@@ -145,9 +150,62 @@ function boot(){
   waitLibs().then(loadData).then(res=>{
     D=res.D; LIVE=res.live;
     return window.d3.json(ATLAS).then(topo=>{ US=window.topojson.feature(topo,topo.objects.states); });
-  }).then(()=>{ initPicker(); render(); }).catch(e=>console.warn('factsheet load failed',e));
+  }).then(()=>{ if(ALL_MODE){ renderAll(); } else { initPicker(); render(); } }).catch(e=>console.warn('factsheet load failed',e));
 }
 boot();
+
+/* ------------------------------------------------------------
+   PRINT-ALL  —  factsheet.html?all=1
+   Renders every state through the normal single-state pipeline and
+   clones each finished sheet into one stacked document, one letter
+   page per state, so the browser's Save-as-PDF yields a single
+   50-page file. Nothing about the single-state view changes.
+   ------------------------------------------------------------ */
+const ALL_MODE=new URLSearchParams(location.search).get('all')==='1';
+
+async function renderAll(){
+  const live=document.getElementById('sheet');
+  const stack=document.createElement('div');
+  stack.id='stack';
+  live.parentNode.insertBefore(stack,live);
+  document.querySelectorAll('.fst-noprint').forEach(n=>n.remove());
+
+  const states=D.states.filter(s=>s.code!=='NE').slice().sort((a,b)=>a.name.localeCompare(b.name));
+  const bar=document.createElement('div');
+  bar.className='fst-noprint';
+  bar.style.cssText="position:fixed;top:0;left:0;right:0;z-index:70;display:flex;align-items:center;gap:14px;padding:14px 24px;background:#1E1B19;color:#fff;font:700 13px 'Figtree'";
+  document.body.insertBefore(bar,document.body.firstChild);
+  stack.style.marginTop='60px';
+
+  for(let i=0;i<states.length;i++){
+    code=states[i].code;
+    render();
+    // Let layout settle so the charts and shrink-to-fit measure against real boxes.
+    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+    const page=live.cloneNode(true);
+    /* Strip every id from the clone. The stack sits before the live sheet, so a
+       cloned #fst-sil/#fst-bills/#fst-rate would shadow the live one and the next
+       state's charts would draw into the page already on the stack. */
+    page.removeAttribute('id');
+    page.querySelectorAll('[id]').forEach(n=>n.removeAttribute('id'));
+    page.style.margin='0 auto';
+    page.style.boxShadow='none';
+    if(i<states.length-1) page.style.breakAfter='page';
+    stack.appendChild(page);
+    bar.textContent='Rendering — '+(i+1)+' of '+states.length+'…';
+  }
+  live.remove();
+
+  bar.innerHTML='';
+  const label=document.createElement('span');
+  label.textContent=states.length+' state factsheets · '+(LIVE?'live data':'baked snapshot');
+  const btn=document.createElement('button');
+  btn.textContent='Save as PDF';
+  btn.style.cssText="font:800 12.5px 'Figtree';padding:9px 16px;border:none;border-radius:8px;background:#D91D4C;color:#fff;cursor:pointer";
+  btn.onclick=()=>window.print();
+  bar.appendChild(label); bar.appendChild(btn);
+  window.__allReady=true;
+}
 
 function initPicker(){
   const sel=document.getElementById('stateSel');
@@ -240,13 +298,17 @@ function renderVals(){
 }
 
 function render(){
-  document.getElementById('sourceNote').textContent = LIVE ? 'Live data loaded' : 'July 2026 data loaded';
+  const note=document.getElementById('sourceNote');
+  if(note) note.textContent = LIVE ? 'Live data loaded' : 'July 2026 data loaded';
   const v=renderVals();
   const capexBlock = v.showCapex ? `
     <div style="display:flex;gap:16px;align-items:center;height:122px;flex:none;padding:2px 0">
-      <div style="flex:none;color:${ACCENT};white-space:nowrap;text-align:center">
-        <div style="font:900 52px/0.92 'Figtree'">${esc(v.capexNum)}</div>
-        <div style="font:900 26px/1 'Figtree'">${esc(v.capexUnit)}</div>
+      <div style="flex:none;color:${ACCENT};white-space:nowrap;text-align:center;print-color-adjust:exact;-webkit-print-color-adjust:exact">
+        <!-- Color set directly on each text div, not inherited from the wrapper: in the
+             PDF export this figure printed a darkened #A46423 while every figure that
+             sets its own color printed exactly. -->
+        <div style="font:900 52px/0.92 'Figtree';color:${ACCENT}">${esc(v.capexNum)}</div>
+        <div style="font:900 26px/1 'Figtree';color:${ACCENT}">${esc(v.capexUnit)}</div>
       </div>
       <div style="flex:1;min-width:0;height:100%;overflow:hidden;display:flex;flex-direction:column;justify-content:center;gap:10px">
         <div data-fit data-fit-min="13" style="font:400 18px/1.3 'Cairo';color:#1E1B19;max-height:74px;overflow:hidden">${esc(v.capexDesc)}</div>
