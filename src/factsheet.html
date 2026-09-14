@@ -221,7 +221,9 @@ function renderVals(){
   let dk=D.dockets.filter(d=>d.code===code&&/active|upcoming/i.test(d.status));
   // Order strictly by the sheet's "Display Priority" (blank sorts last), then sheet order.
   dk.sort((a,b)=>(a.priority==null?1e9:a.priority)-(b.priority==null?1e9:b.priority)||(a.row||0)-(b.row||0));
-  let docketRows=dk.slice(0,3).map(d=>({dlabel:(d.id?('Docket '+d.id):(d.type||'Proceeding')),sep:(d.title?': ':' '),title:(d.title||d.utility||''),link:d.link||''}));
+  // "(Upcoming)" rides inside the bolded label, and upcoming rows carry no link.
+  let docketRows=dk.slice(0,3).map(d=>{const up=/upcoming/i.test(d.status);
+    return {dlabel:(d.id?('Docket '+d.id):(d.type||'Proceeding'))+(up?' (Upcoming)':''),sep:(d.title?': ':' '),title:(d.title||d.utility||''),link:up?'':(d.link||'')};});
   if(!docketRows.length) docketRows=[{dlabel:'',sep:'',title:'No active or upcoming proceedings on file.',link:''}];
   const docketSearch=puc.docketSearch||'';
 
@@ -261,7 +263,7 @@ function render(){
   const docketLis=v.docketRows.map(d=>{
     const lab = !d.dlabel ? '' : (d.link
       ? `<a href="${esc(d.link)}" target="_blank" style="font-family:'Figtree';font-weight:800;color:#1E1B19;text-decoration:underline">${esc(d.dlabel)}</a>`
-      : `<b style="font-family:'Figtree';font-weight:800;color:#1E1B19;text-decoration:underline">${esc(d.dlabel)}</b>`);
+      : `<b style="font-family:'Figtree';font-weight:800;color:#1E1B19">${esc(d.dlabel)}</b>`);
     return `
     <li style="display:flex;gap:9px">
       <span style="width:6px;height:6px;border-radius:50%;background:#1E1B19;margin-top:6px;flex:none"></span>
